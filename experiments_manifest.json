@@ -1,0 +1,13 @@
+{
+  "experiments": [
+    {
+      "id": "Experiment01",
+      "title": "Somma di due interi",
+      "function_name": "solution",
+      "smoke_call": {
+        "args": [2, 3],
+        "kwargs": {}
+      }
+    }
+  ]
+}
