@@ -36,19 +36,19 @@ def test_alphanumeric_tokens_are_preserved() -> None:
     assert fn(text) == {"version2": 2, "beta2": 1, "release2026": 1}
 
 
-def test_unicode_casefold_is_supported_in_advanced() -> None:
+def test_unicode_casefold_is_supported() -> None:
     fn = load_function_from_env()
 
     assert fn("STRASSE stra\u00dfe") == {"strasse": 2}
 
 
-def test_greek_final_sigma_is_normalized_in_advanced() -> None:
+def test_greek_final_sigma_is_normalized() -> None:
     fn = load_function_from_env()
 
     assert fn("\u039f\u03a3 \u03bf\u03c2 \u03bf\u03c3") == {"\u03bf\u03c3": 3}
 
 
-def test_typographic_ligatures_are_normalized_in_advanced() -> None:
+def test_typographic_ligatures_are_normalized() -> None:
     fn = load_function_from_env()
 
     assert fn("\ufb03 ffi") == {"ffi": 2}

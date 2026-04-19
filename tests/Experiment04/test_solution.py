@@ -38,13 +38,13 @@ def test_various_exact_case_inputs(text: str, expected: bool) -> None:
     assert fn(text) is expected
 
 
-def test_case_insensitive_palindrome_is_supported_in_advanced() -> None:
+def test_case_insensitive_palindrome_is_supported() -> None:
     fn = load_function_from_env()
 
     assert fn("Anna") is True
 
 
-def test_non_string_sequences_are_rejected_in_advanced() -> None:
+def test_non_string_sequences_are_rejected() -> None:
     fn = load_function_from_env()
 
     with pytest.raises(TypeError):
