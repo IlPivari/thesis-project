@@ -11,7 +11,7 @@
             {"name": "a", "age": 30}
           ]
         ],
-        "kwargs": {"key": "name", "reverse": false}
+        "kwargs": {"sort_key": "name", "reverse": false}
       }
     }
   ]
