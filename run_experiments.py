@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import time
+import ast
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
@@ -157,6 +158,49 @@ def _metric_smoke_run(file_path: Path, function_name: str, smoke_call: dict[str,
             "seconds": res.seconds,
             "stdout": _short(res.stdout),
             "stderr": _short(res.stderr),
+        },
+    )
+
+
+def _metric_documentation(file_path: Path, function_name: str) -> MetricResult:
+    """Check whether the target function contains a non-empty docstring.
+
+    This is intentionally AST-based to avoid executing user code.
+    """
+
+    start = time.perf_counter()
+    try:
+        source = file_path.read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=str(file_path))
+    except Exception as e:
+        end = time.perf_counter()
+        return MetricResult(
+            ok=False,
+            score=0.0,
+            details={"seconds": end - start, "error": repr(e)},
+        )
+
+    doc: str | None = None
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == function_name:
+            doc = ast.get_docstring(node)
+            break
+
+    ok = bool(doc and doc.strip())
+    end = time.perf_counter()
+    preview = ""
+    if doc:
+        preview = doc.strip().replace("\r\n", "\n")
+        preview = preview[:300]
+
+    return MetricResult(
+        ok=ok,
+        score=10.0 if ok else 0.0,
+        details={
+            "seconds": end - start,
+            "has_docstring": ok,
+            "docstring_len": len(doc.strip()) if doc else 0,
+            "docstring_preview": preview,
         },
     )
 
@@ -417,6 +461,7 @@ def _evaluate_variant(
 
     metrics["syntax"] = _metric_syntax(file_path)
     metrics["execution"] = _metric_smoke_run(file_path, function_name, smoke_call)
+    metrics["documentation"] = _metric_documentation(file_path, function_name)
     metrics["test"] = _metric_pytest(file_path, function_name, test_dir)
 
     metrics["lint"] = _metric_ruff(file_path)
@@ -434,6 +479,7 @@ def _print_summary(exp: ExperimentResult) -> None:
     metric_names = [
         "syntax",
         "execution",
+        "documentation",
         "test",
         "lint",
         "type_checking",

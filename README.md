@@ -4,6 +4,7 @@ Obiettivo: per ogni esperimento generare **la stessa funzione** due volte (promp
 
 - sintassi
 - esecuzione (smoke run)
+- documentazione (docstring)
 - test
 - lint
 - type checking
