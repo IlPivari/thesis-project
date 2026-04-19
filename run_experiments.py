@@ -279,6 +279,30 @@ def _metric_mypy(file_path: Path) -> MetricResult:
     )
 
 
+def _complexity_score_from_cc(cc_max: float | int | None) -> float | None:
+    if cc_max is None:
+        return None
+
+    if cc_max <= 2:
+        return 10.0
+    if cc_max <= 4:
+        return 8.0
+    if cc_max <= 6:
+        return 6.0
+    if cc_max <= 8:
+        return 4.0
+    if cc_max <= 10:
+        return 2.0
+    return 0.0
+
+
+def _complexity_score_from_mi(mi_value: float | int | None) -> float | None:
+    if mi_value is None:
+        return None
+
+    return max(0.0, min(10.0, float(mi_value) / 10.0))
+
+
 def _metric_radon(file_path: Path) -> MetricResult:
     cmd_cc = [_python(), "-m", "radon", "cc", "-j", str(file_path)]
     res_cc = _run(cmd_cc, cwd=ROOT)
@@ -304,24 +328,19 @@ def _metric_radon(file_path: Path) -> MetricResult:
 
     ok = res_cc.ok and res_mi.ok
 
-    # Complexity scoring (0..10): lower max CC is better.
-    # If we can't compute cc_max, fall back to OK/KO.
+    # Complexity scoring (0..10): combine worst-block cyclomatic complexity
+    # with maintainability index, keeping CC slightly dominant for short files.
     score: float
-    if cc_max is None:
-        score = 10.0 if ok else 0.0
+    cc_score = _complexity_score_from_cc(cc_max)
+    mi_score = _complexity_score_from_mi(mi)
+    if cc_score is not None and mi_score is not None:
+        score = round((0.6 * cc_score) + (0.4 * mi_score), 2)
+    elif cc_score is not None:
+        score = cc_score
+    elif mi_score is not None:
+        score = mi_score
     else:
-        if cc_max <= 2:
-            score = 10.0
-        elif cc_max <= 4:
-            score = 8.0
-        elif cc_max <= 6:
-            score = 6.0
-        elif cc_max <= 8:
-            score = 4.0
-        elif cc_max <= 10:
-            score = 2.0
-        else:
-            score = 0.0
+        score = 10.0 if ok else 0.0
 
     return MetricResult(
         ok=ok,
@@ -330,7 +349,10 @@ def _metric_radon(file_path: Path) -> MetricResult:
             "cc": {"cmd": cmd_cc, "seconds": res_cc.seconds, "stdout": _short(res_cc.stdout), "stderr": _short(res_cc.stderr)},
             "mi": {"cmd": cmd_mi, "seconds": res_mi.seconds, "stdout": _short(res_mi.stdout), "stderr": _short(res_mi.stderr)},
             "cc_max": cc_max,
+            "cc_score": cc_score,
             "mi_value": mi,
+            "mi_score": mi_score,
+            "weights": {"cc": 0.6, "mi": 0.4},
         },
     )
 
@@ -496,8 +518,15 @@ def _print_summary(exp: ExperimentResult) -> None:
         if metric == "complexity":
             b_cc = b.details.get("cc_max")
             a_cc = a.details.get("cc_max")
-            if b_cc is not None or a_cc is not None:
-                extra = f"  (cc_max basic={b_cc}, advanced={a_cc})"
+            b_mi = b.details.get("mi_value")
+            a_mi = a.details.get("mi_value")
+            if b_cc is not None or a_cc is not None or b_mi is not None or a_mi is not None:
+                extra = (
+                    "  ("
+                    f"cc_max basic={b_cc}, advanced={a_cc}; "
+                    f"mi basic={b_mi}, advanced={a_mi}"
+                    ")"
+                )
         if metric == "basic_security":
             b_issues = b.details.get("issues")
             a_issues = a.details.get("issues")
