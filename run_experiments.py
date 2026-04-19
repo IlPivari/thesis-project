@@ -100,6 +100,10 @@ def _load_manifest() -> list[dict[str, Any]]:
 def _experiment_paths(experiment_id: str) -> tuple[Path, Path]:
     exp_dir = EXPERIMENTS_DIR / experiment_id
     test_dir = TESTS_DIR / experiment_id
+    if not test_dir.exists():
+        lower_test_dir = TESTS_DIR / experiment_id.lower()
+        if lower_test_dir.exists():
+            test_dir = lower_test_dir
     return exp_dir, test_dir
 
 
