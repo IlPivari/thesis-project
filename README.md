@@ -1,23 +1,28 @@
 # Thesis Project — Prompt Minimal vs Detailed (Python)
 
 Obiettivo: per ogni esperimento generare **la stessa funzione** due volte (prompt minimale vs prompt dettagliato), eseguire **gli stessi test** e confrontare i risultati su:
+
 - sintassi
 - esecuzione (smoke run)
 - test
-- copertura
 - lint
 - type checking
 - complessità
 - sicurezza di base
+- tempo di esecuzione (performance)
+
+## Scoring
+
+Ogni metrica produce un punteggio su 10.
+- **test**: $10 \cdot \frac{\#passed}{\#total}$
+- **performance**: confronto relativo tra basic/advanced (la più veloce ottiene 10/10, l’altra scala sul rapporto dei tempi)
+- altre metriche: 10 se OK, 0 se KO (eccetto **complessità**, che usa una scala basata sulla cyclomatic complexity massima)
 
 ## Struttura
 
 - `experiments/Experiment01/` (e così via)
   - `basic.py` (versione con prompt base)
   - `advanced.py` (versione con prompt avanzato)
-  - Nota: dentro ogni `ExperimentNN` devono esserci **solo questi 2 file**.
-- `tests/Experiment01/` (e così via)
-  - test pytest usati per entrambe le versioni
 - `experiments_manifest.json`
   - definisce per ogni esperimento un *smoke call* (argomenti) usato per la verifica “esecuzione”
 - `run_experiments.py`
@@ -35,7 +40,7 @@ Obiettivo: per ogni esperimento generare **la stessa funzione** due volte (promp
 ## Esecuzione
 
 - Lancia il runner:
-  - `python run_experiments.py`
+  - `& "c:/Users/Matteo P/Desktop/thesis-project/.venv/Scripts/python.exe" run_experiments.py`
 
 Output:
 - stampa un riepilogo su console

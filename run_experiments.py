@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -33,6 +34,7 @@ class CommandResult:
 @dataclass
 class MetricResult:
     ok: bool
+    score: float
     details: dict[str, Any]
 
 
@@ -126,7 +128,7 @@ def _metric_syntax(file_path: Path) -> MetricResult:
         ok = False
         error = repr(e)
     end = time.perf_counter()
-    return MetricResult(ok=ok, details={"seconds": end - start, "error": error})
+    return MetricResult(ok=ok, score=10.0 if ok else 0.0, details={"seconds": end - start, "error": error})
 
 
 def _metric_smoke_run(file_path: Path, function_name: str, smoke_call: dict[str, Any]) -> MetricResult:
@@ -149,6 +151,7 @@ def _metric_smoke_run(file_path: Path, function_name: str, smoke_call: dict[str,
     res = _run(cmd, cwd=ROOT)
     return MetricResult(
         ok=res.ok,
+        score=10.0 if res.ok else 0.0,
         details={
             "cmd": cmd[:3] + ["<file>", function_name, "<args>", "<kwargs>"] ,
             "seconds": res.seconds,
@@ -158,6 +161,38 @@ def _metric_smoke_run(file_path: Path, function_name: str, smoke_call: dict[str,
     )
 
 
+def _parse_pytest_counts(output: str) -> dict[str, int]:
+    """Best-effort parser for pytest summary line.
+
+    Expects a tail like: '3 passed, 1 failed, 1 error in 0.12s'
+    Returns dict with keys: passed, failed, error, skipped, xfailed, xpassed.
+    Missing keys default to 0.
+    """
+
+    counts = {"passed": 0, "failed": 0, "error": 0, "skipped": 0, "xfailed": 0, "xpassed": 0}
+    # Look across the full output; the summary is usually at the end.
+    for key in list(counts.keys()):
+        m = re.search(rf"(\d+)\s+{key}", output)
+        if m:
+            counts[key] = int(m.group(1))
+    return counts
+
+
+def _score_tests_from_output(stdout: str, stderr: str, returncode: int) -> tuple[float, dict[str, Any]]:
+    text = (stdout or "") + "\n" + (stderr or "")
+    counts = _parse_pytest_counts(text)
+    total = counts["passed"] + counts["failed"] + counts["error"] + counts["xpassed"]
+
+    # If pytest didn't print a standard summary, fall back to OK/KO.
+    if total <= 0:
+        score = 10.0 if returncode == 0 else 0.0
+    else:
+        score = 10.0 * (counts["passed"] / total)
+
+    details = {"counts": counts, "total": total}
+    return score, details
+
+
 def _metric_pytest(file_path: Path, function_name: str, test_dir: Path) -> MetricResult:
     env = os.environ.copy()
     env["TARGET_FILE"] = str(file_path)
@@ -165,100 +200,17 @@ def _metric_pytest(file_path: Path, function_name: str, test_dir: Path) -> Metri
 
     cmd = [_python(), "-m", "pytest", str(test_dir)]
     res = _run(cmd, env=env, cwd=ROOT)
+
+    score, score_details = _score_tests_from_output(res.stdout, res.stderr, res.returncode)
     return MetricResult(
         ok=res.ok,
+        score=score,
         details={
             "cmd": cmd,
             "seconds": res.seconds,
             "stdout": _short(res.stdout),
             "stderr": _short(res.stderr),
-        },
-    )
-
-
-def _metric_coverage(file_path: Path, function_name: str, test_dir: Path, data_file: Path) -> MetricResult:
-    env = os.environ.copy()
-    env["TARGET_FILE"] = str(file_path)
-    env["TARGET_FUNCTION"] = function_name
-    env["COVERAGE_FILE"] = str(data_file)
-
-    # If coverage is configured with parallel mode, it will create data files with
-    # extra suffixes (pid/machine/random). We need to combine them back into the
-    # base file before exporting a report.
-    for p in [data_file, *data_file.parent.glob(data_file.name + ".*")]:
-        try:
-            p.unlink()
-        except FileNotFoundError:
-            pass
-
-    cmd_run = [_python(), "-m", "coverage", "run", "--branch", "-m", "pytest", str(test_dir)]
-    run_res = _run(cmd_run, env=env, cwd=ROOT)
-    if not run_res.ok:
-        return MetricResult(
-            ok=False,
-            details={
-                "cmd": cmd_run,
-                "seconds": run_res.seconds,
-                "returncode": run_res.returncode,
-                "stdout": _short(run_res.stdout),
-                "stderr": _short(run_res.stderr),
-            },
-        )
-
-    cmd_combine = [_python(), "-m", "coverage", "combine"]
-    combine_res = _run(cmd_combine, env=env, cwd=ROOT)
-    if not combine_res.ok:
-        return MetricResult(
-            ok=False,
-            details={
-                "run": {"cmd": cmd_run, "seconds": run_res.seconds, "returncode": run_res.returncode},
-                "combine": {
-                    "cmd": cmd_combine,
-                    "seconds": combine_res.seconds,
-                    "returncode": combine_res.returncode,
-                    "stdout": _short(combine_res.stdout),
-                    "stderr": _short(combine_res.stderr),
-                },
-            },
-        )
-
-    json_out = data_file.with_suffix(data_file.suffix + ".json")
-    cmd_json = [_python(), "-m", "coverage", "json", "--data-file", str(data_file), "-o", str(json_out)]
-    json_res = _run(cmd_json, env=env, cwd=ROOT)
-    pct = None
-    if json_res.ok and json_out.exists():
-        try:
-            cov = json.loads(json_out.read_text(encoding="utf-8"))
-            pct = cov.get("totals", {}).get("percent_covered")
-        except Exception:
-            pct = None
-
-    return MetricResult(
-        ok=json_res.ok,
-        details={
-            "run": {
-                "cmd": cmd_run,
-                "seconds": run_res.seconds,
-                "returncode": run_res.returncode,
-                "stdout": _short(run_res.stdout),
-                "stderr": _short(run_res.stderr),
-            },
-            "combine": {
-                "cmd": cmd_combine,
-                "seconds": combine_res.seconds,
-                "returncode": combine_res.returncode,
-                "stdout": _short(combine_res.stdout),
-                "stderr": _short(combine_res.stderr),
-            },
-            "json": {
-                "cmd": cmd_json,
-                "seconds": json_res.seconds,
-                "returncode": json_res.returncode,
-                "stdout": _short(json_res.stdout),
-                "stderr": _short(json_res.stderr),
-            },
-            "percent_covered": pct,
-            "coverage_json": str(json_out),
+            **score_details,
         },
     )
 
@@ -266,13 +218,21 @@ def _metric_coverage(file_path: Path, function_name: str, test_dir: Path, data_f
 def _metric_ruff(file_path: Path) -> MetricResult:
     cmd = [_python(), "-m", "ruff", "check", str(file_path)]
     res = _run(cmd, cwd=ROOT)
-    return MetricResult(ok=res.ok, details={"cmd": cmd, "seconds": res.seconds, "stdout": _short(res.stdout)})
+    return MetricResult(
+        ok=res.ok,
+        score=10.0 if res.ok else 0.0,
+        details={"cmd": cmd, "seconds": res.seconds, "stdout": _short(res.stdout), "stderr": _short(res.stderr)},
+    )
 
 
 def _metric_mypy(file_path: Path) -> MetricResult:
     cmd = [_python(), "-m", "mypy", str(file_path)]
     res = _run(cmd, cwd=ROOT)
-    return MetricResult(ok=res.ok, details={"cmd": cmd, "seconds": res.seconds, "stdout": _short(res.stdout)})
+    return MetricResult(
+        ok=res.ok,
+        score=10.0 if res.ok else 0.0,
+        details={"cmd": cmd, "seconds": res.seconds, "stdout": _short(res.stdout), "stderr": _short(res.stderr)},
+    )
 
 
 def _metric_radon(file_path: Path) -> MetricResult:
@@ -299,8 +259,29 @@ def _metric_radon(file_path: Path) -> MetricResult:
             mi = None
 
     ok = res_cc.ok and res_mi.ok
+
+    # Complexity scoring (0..10): lower max CC is better.
+    # If we can't compute cc_max, fall back to OK/KO.
+    score: float
+    if cc_max is None:
+        score = 10.0 if ok else 0.0
+    else:
+        if cc_max <= 2:
+            score = 10.0
+        elif cc_max <= 4:
+            score = 8.0
+        elif cc_max <= 6:
+            score = 6.0
+        elif cc_max <= 8:
+            score = 4.0
+        elif cc_max <= 10:
+            score = 2.0
+        else:
+            score = 0.0
+
     return MetricResult(
         ok=ok,
+        score=score,
         details={
             "cc": {"cmd": cmd_cc, "seconds": res_cc.seconds, "stdout": _short(res_cc.stdout), "stderr": _short(res_cc.stderr)},
             "mi": {"cmd": cmd_mi, "seconds": res_mi.seconds, "stdout": _short(res_mi.stdout), "stderr": _short(res_mi.stderr)},
@@ -331,12 +312,85 @@ def _metric_bandit(file_path: Path) -> MetricResult:
     ok = tool_ok and (issues == 0)
     return MetricResult(
         ok=ok,
+        score=10.0 if ok else 0.0,
         details={
             "cmd": cmd,
             "seconds": res.seconds,
             "returncode": res.returncode,
             "issues": issues,
             "severity_counts": sev_counts,
+            "stdout": _short(res.stdout),
+            "stderr": _short(res.stderr),
+        },
+    )
+
+
+def _metric_performance(file_path: Path, function_name: str, smoke_call: dict[str, Any]) -> MetricResult:
+    """Measure average time per call (seconds) in a separate process.
+
+    Uses the manifest smoke_call args/kwargs. The scoring is computed later, relative
+    between basic/advanced (fastest gets 10).
+    """
+
+    args = smoke_call.get("args", [])
+    kwargs = smoke_call.get("kwargs", {})
+
+    code = """\
+import importlib.util
+import json
+import sys
+import time
+from pathlib import Path
+
+p = Path(sys.argv[1])
+fn_name = sys.argv[2]
+
+spec = importlib.util.spec_from_file_location(p.stem, str(p))
+m = importlib.util.module_from_spec(spec)
+assert spec and spec.loader
+spec.loader.exec_module(m)
+
+fn = getattr(m, fn_name)
+args = json.loads(sys.argv[3])
+kwargs = json.loads(sys.argv[4])
+
+# Warm-up
+fn(*args, **kwargs)
+
+loops = 1
+target = 0.25
+max_loops = 1_000_000
+
+while True:
+    t0 = time.perf_counter()
+    for _ in range(loops):
+        fn(*args, **kwargs)
+    elapsed = time.perf_counter() - t0
+    if elapsed >= target or loops >= max_loops:
+        break
+    loops *= 2
+
+avg = elapsed / loops
+print(avg)
+"""
+
+    cmd = [_python(), "-c", code, str(file_path), function_name, json.dumps(args), json.dumps(kwargs)]
+    res = _run(cmd, cwd=ROOT)
+    avg_s = None
+    if res.ok:
+        try:
+            avg_s = float(res.stdout.strip().splitlines()[-1])
+        except Exception:
+            avg_s = None
+
+    return MetricResult(
+        ok=res.ok and (avg_s is not None),
+        # score will be assigned later after comparing variants
+        score=0.0,
+        details={
+            "cmd": cmd[:3] + ["<file>", function_name, "<args>", "<kwargs>"],
+            "seconds": res.seconds,
+            "avg_seconds_per_call": avg_s,
             "stdout": _short(res.stdout),
             "stderr": _short(res.stderr),
         },
@@ -365,13 +419,11 @@ def _evaluate_variant(
     metrics["execution"] = _metric_smoke_run(file_path, function_name, smoke_call)
     metrics["test"] = _metric_pytest(file_path, function_name, test_dir)
 
-    cov_data = ROOT / f".coverage.{experiment_id}.{variant}"
-    metrics["coverage"] = _metric_coverage(file_path, function_name, test_dir, cov_data)
-
     metrics["lint"] = _metric_ruff(file_path)
     metrics["type_checking"] = _metric_mypy(file_path)
     metrics["complexity"] = _metric_radon(file_path)
     metrics["basic_security"] = _metric_bandit(file_path)
+    metrics["performance"] = _metric_performance(file_path, function_name, smoke_call)
 
     return VariantResult(variant=variant, file=str(file_path), metrics=metrics)
 
@@ -379,18 +431,15 @@ def _evaluate_variant(
 def _print_summary(exp: ExperimentResult) -> None:
     print(f"\n== {exp.experiment_id} — {exp.title} ==")
 
-    def fmt_ok(v: bool) -> str:
-        return "OK" if v else "FAIL"
-
     metric_names = [
         "syntax",
         "execution",
         "test",
-        "coverage",
         "lint",
         "type_checking",
         "complexity",
         "basic_security",
+        "performance",
     ]
 
     for metric in metric_names:
@@ -398,11 +447,6 @@ def _print_summary(exp: ExperimentResult) -> None:
         a = exp.results["advanced"].metrics[metric]
 
         extra = ""
-        if metric == "coverage":
-            b_pct = b.details.get("percent_covered")
-            a_pct = a.details.get("percent_covered")
-            if b_pct is not None or a_pct is not None:
-                extra = f"  (basic={b_pct}%, advanced={a_pct}%)"
         if metric == "complexity":
             b_cc = b.details.get("cc_max")
             a_cc = a.details.get("cc_max")
@@ -413,8 +457,13 @@ def _print_summary(exp: ExperimentResult) -> None:
             a_issues = a.details.get("issues")
             if b_issues is not None or a_issues is not None:
                 extra = f"  (issues basic={b_issues}, advanced={a_issues})"
+        if metric == "performance":
+            b_t = b.details.get("avg_seconds_per_call")
+            a_t = a.details.get("avg_seconds_per_call")
+            if b_t is not None or a_t is not None:
+                extra = f"  (avg_s/call basic={b_t}, advanced={a_t})"
 
-        print(f"- {metric:14} basic={fmt_ok(b.ok):4} | advanced={fmt_ok(a.ok):4}{extra}")
+        print(f"- {metric:14} basic={b.score:4.1f}/10 | advanced={a.score:4.1f}/10{extra}")
 
 
 def main() -> int:
@@ -466,6 +515,20 @@ def main() -> int:
             function_name=function_name,
             results={"basic": basic, "advanced": advanced},
         )
+
+        # Assign relative performance scores (fastest gets 10, slower scales by ratio).
+        b_perf = exp_result.results["basic"].metrics["performance"]
+        a_perf = exp_result.results["advanced"].metrics["performance"]
+        b_t = b_perf.details.get("avg_seconds_per_call")
+        a_t = a_perf.details.get("avg_seconds_per_call")
+        if isinstance(b_t, (int, float)) and isinstance(a_t, (int, float)) and b_t > 0 and a_t > 0:
+            best = min(float(b_t), float(a_t))
+            b_perf.score = min(10.0, 10.0 * best / float(b_t))
+            a_perf.score = min(10.0, 10.0 * best / float(a_t))
+        else:
+            b_perf.score = 10.0 if b_perf.ok else 0.0
+            a_perf.score = 10.0 if a_perf.ok else 0.0
+
         all_results.append(exp_result)
         _print_summary(exp_result)
 
@@ -477,7 +540,6 @@ def main() -> int:
         "tooling": {
             "ruff": shutil.which("ruff"),
             "mypy": shutil.which("mypy"),
-            "coverage": shutil.which("coverage"),
             "radon": shutil.which("radon"),
             "bandit": shutil.which("bandit"),
         },

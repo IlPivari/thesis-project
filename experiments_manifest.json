@@ -1,12 +1,26 @@
 {
   "experiments": [
     {
-      "id": "Experiment01",
+      "id": "Experiment00",
       "title": "Somma di due interi",
       "function_name": "solution",
       "smoke_call": {
         "args": [2, 3],
         "kwargs": {}
+      }
+    },
+    {
+      "id": "Experiment01",
+      "title": "Ordina lista di dizionari",
+      "function_name": "solution",
+      "smoke_call": {
+        "args": [
+          [
+            {"name": "b", "age": 20},
+            {"name": "a", "age": 30}
+          ]
+        ],
+        "kwargs": {"key": "name", "reverse": false}
       }
     }
   ]
