@@ -120,6 +120,15 @@
         ],
         "kwargs": {}
       }
+    },
+    {
+      "id": "Experiment04",
+      "title": "Verifica se una stringa è palindroma",
+      "function_name": "solution",
+      "smoke_call": {
+        "args": ["anna"],
+        "kwargs": {}
+      }
     }
   ]
 }
