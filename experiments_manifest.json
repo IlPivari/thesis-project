@@ -13,6 +13,15 @@
         ],
         "kwargs": {"sort_key": "name", "reverse": false}
       }
+    },
+    {
+      "id": "Experiment02",
+      "title": "Numeri primi fino a n",
+      "function_name": "solution",
+      "smoke_call": {
+        "args": [10],
+        "kwargs": {}
+      }
     }
   ]
 }
