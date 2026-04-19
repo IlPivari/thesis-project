@@ -41,7 +41,7 @@ Ogni metrica produce un punteggio su 10.
 ## Esecuzione
 
 - Lancia il runner:
-  - `& "c:/Users/Matteo P/Desktop/thesis-project/.venv/Scripts/python.exe" run_experiments.py`
+  - `& "PATH_TO_PROJECT_FOLDER/thesis-project/.venv/Scripts/python.exe" run_experiments.py`
 
 Output:
 - stampa un riepilogo su console

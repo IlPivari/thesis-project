@@ -163,6 +163,17 @@
         ],
         "kwargs": {}
       }
+    },
+    {
+      "id": "Experiment08",
+      "title": "Conta il numero di righe in un file di testo",
+      "function_name": "solution",
+      "smoke_call": {
+        "args": [
+          "tests/experiment08/performance_input.txt"
+        ],
+        "kwargs": {}
+      }
     }
   ]
 }
