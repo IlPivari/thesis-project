@@ -15,7 +15,7 @@ Obiettivo: per ogni esperimento generare **la stessa funzione** due volte (promp
 ## Scoring
 
 Ogni metrica produce un punteggio su 10.
-- **test**: $10 \cdot \frac{\#passed}{\#total}$
+- **test**: $`10 \cdot \frac{\#passed}{\#total}`$
 - **performance**: confronto relativo tra basic/advanced (la più veloce ottiene 10/10, l’altra scala sul rapporto dei tempi)
 - **complessità**, una media pesata tra una scala basata sulla cyclomatic complexity massima (60% del punteggio) e il maintainability index(40% del punteggio)
 - altre metriche: 10 se OK, 0 se KO
