@@ -22,13 +22,13 @@ Ogni metrica produce un punteggio su 10.
 
 ## Struttura
 
-- `experiments/Experiment01/` (e così via)
-  - `basic.py` (versione con prompt base)
-  - `advanced.py` (versione con prompt avanzato)
+- `experiments/ExperimentNN/`
+  - `basic.py`: versione con prompt base
+  - `advanced.py`: versione con prompt avanzato
 - `experiments_manifest.json`
   - definisce per ogni esperimento un *smoke call* (argomenti) usato per la verifica “esecuzione”
-- `run_experiments.py`
-  - runner che valuta `basic.py` vs `advanced.py` e stampa/salva i risultati
+- `tests/ExperimentNN/`
+  - `run_experiments.py`: runner che valuta `basic.py` vs `advanced.py` e stampa/salva i risultati
 
 ## Come aggiungere un esperimento
 
@@ -36,7 +36,7 @@ Ogni metrica produce un punteggio su 10.
 2. Inserisci **solo**:
    - `basic.py`
    - `advanced.py`
-3. Crea i test in `tests/ExperimentNN/` (uguali per entrambe le versioni).
+3. Crea i test in `tests/ExperimentNN/run_experiments.py` (uguali per entrambe le versioni).
 4. Aggiungi/aggiorna la voce in `experiments_manifest.json`.
 
 ## Esecuzione
