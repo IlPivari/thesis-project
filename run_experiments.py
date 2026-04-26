@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import re
@@ -117,6 +118,34 @@ def _load_manifest() -> list[dict[str, Any]]:
     if not isinstance(experiments, list):
         raise ValueError("Invalid manifest: missing 'experiments' list")
     return experiments
+
+
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Run thesis experiments and collect metrics.",
+    )
+    parser.add_argument(
+        "experiment",
+        nargs="?",
+        help="Optional experiment number or id (for example: 11 or Experiment11).",
+    )
+    return parser.parse_args(argv)
+
+
+def _normalize_experiment_selector(selector: str) -> str:
+    selector = selector.strip()
+    if not selector:
+        raise ValueError("Experiment selector cannot be empty")
+    if selector.isdigit():
+        return f"Experiment{int(selector):02d}"
+
+    match = re.fullmatch(r"Experiment(\d+)", selector, flags=re.IGNORECASE)
+    if match:
+        return f"Experiment{int(match.group(1)):02d}"
+
+    raise ValueError(
+        "Experiment selector must be a number like '11' or an id like 'Experiment11'"
+    )
 
 
 def _experiment_paths(experiment_id: str) -> tuple[Path, Path]:
@@ -471,24 +500,43 @@ print(avg)
 """
 
     cmd = [_python(), "-c", code, str(file_path), function_name, json.dumps(args), json.dumps(kwargs)]
-    res = _run(cmd, cwd=ROOT)
-    avg_s = None
-    if res.ok:
+    samples: list[float] = []
+    total_seconds = 0.0
+    last_stdout = ""
+    last_stderr = ""
+    last_returncode = 0
+    runs = 10
+
+    for _ in range(runs):
+        res = _run(cmd, cwd=ROOT)
+        total_seconds += res.seconds
+        last_stdout = res.stdout
+        last_stderr = res.stderr
+        last_returncode = res.returncode
+
+        if not res.ok:
+            break
+
         try:
-            avg_s = float(res.stdout.strip().splitlines()[-1])
+            samples.append(float(res.stdout.strip().splitlines()[-1]))
         except Exception:
-            avg_s = None
+            break
+
+    avg_s = (sum(samples) / len(samples)) if samples else None
 
     return MetricResult(
-        ok=res.ok and (avg_s is not None),
+        ok=len(samples) == runs and (avg_s is not None),
         # score will be assigned later after comparing variants
         score=0.0,
         details={
             "cmd": cmd[:3] + ["<file>", function_name, "<args>", "<kwargs>"],
-            "seconds": res.seconds,
+            "seconds": total_seconds,
+            "runs": runs,
+            "samples_seconds_per_call": samples,
             "avg_seconds_per_call": avg_s,
-            "stdout": _short(res.stdout),
-            "stderr": _short(res.stderr),
+            "returncode": last_returncode,
+            "stdout": _short(last_stdout),
+            "stderr": _short(last_stderr),
         },
     )
 
@@ -625,7 +673,9 @@ def _save_excel_results(all_results: list[ExperimentResult], timestamp: str) -> 
     return out_path
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    args = _parse_args(argv)
+
     if not MANIFEST_PATH.exists():
         print(f"Missing manifest: {MANIFEST_PATH}", file=sys.stderr)
         return 2
@@ -633,6 +683,16 @@ def main() -> int:
     RESULTS_DIR.mkdir(exist_ok=True)
 
     experiments = _load_manifest()
+    if args.experiment:
+        selected_experiment_id = _normalize_experiment_selector(args.experiment)
+        experiments = [exp for exp in experiments if str(exp.get("id")) == selected_experiment_id]
+        if not experiments:
+            print(
+                f"Experiment not found in manifest: {selected_experiment_id}",
+                file=sys.stderr,
+            )
+            return 2
+
     all_results: list[ExperimentResult] = []
 
     for exp in experiments:
