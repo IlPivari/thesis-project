@@ -13,12 +13,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 
+from openpyxl import load_workbook
+
 
 ROOT = Path(__file__).resolve().parent
 EXPERIMENTS_DIR = ROOT / "experiments"
 TESTS_DIR = ROOT / "tests"
 MANIFEST_PATH = ROOT / "experiments_manifest.json"
 RESULTS_DIR = ROOT / "results"
+RESULTS_TEMPLATE_PATH = RESULTS_DIR / "experiments-results-template.xlsx"
 
 Variant = Literal["basic", "advanced"]
 
@@ -52,6 +55,25 @@ class ExperimentResult:
     title: str
     function_name: str
     results: dict[Variant, VariantResult]
+
+
+EXCEL_METRIC_COLUMNS = {
+    "syntax": 6,
+    "execution": 7,
+    "documentation": 8,
+    "test": 9,
+    "lint": 10,
+    "type_checking": 11,
+    "cyclomatic_complexity": 12,
+    "maintainability_index": 13,
+    "basic_security": 14,
+    "performance": 15,
+}
+
+EXCEL_VARIANT_LABELS = {
+    "basic": "Base",
+    "advanced": "Avanzato",
+}
 
 
 def _run(cmd: list[str], env: dict[str, str] | None = None, cwd: Path | None = None) -> CommandResult:
@@ -549,6 +571,60 @@ def _print_summary(exp: ExperimentResult) -> None:
         print(f"- {metric:14} basic={b.score:4.1f}/10 | advanced={a.score:4.1f}/10{extra}")
 
 
+def _experiment_number(experiment_id: str) -> int:
+    match = re.search(r"(\d+)$", experiment_id)
+    if not match:
+        raise ValueError(f"Cannot extract experiment number from id: {experiment_id}")
+    return int(match.group(1))
+
+
+def _build_excel_row_index(worksheet: Any) -> dict[tuple[int, str], int]:
+    row_index: dict[tuple[int, str], int] = {}
+    for row in range(2, worksheet.max_row + 1):
+        experiment_number = worksheet.cell(row=row, column=1).value
+        variant_label = worksheet.cell(row=row, column=4).value
+        if experiment_number is None or variant_label is None:
+            continue
+
+        try:
+            normalized_experiment = int(experiment_number)
+        except (TypeError, ValueError):
+            continue
+
+        normalized_variant = str(variant_label).strip().casefold()
+        row_index[(normalized_experiment, normalized_variant)] = row
+
+    return row_index
+
+
+def _save_excel_results(all_results: list[ExperimentResult], timestamp: str) -> Path:
+    if not RESULTS_TEMPLATE_PATH.exists():
+        raise FileNotFoundError(f"Missing Excel template: {RESULTS_TEMPLATE_PATH}")
+
+    workbook = load_workbook(RESULTS_TEMPLATE_PATH)
+    worksheet = workbook[workbook.sheetnames[0]]
+    row_index = _build_excel_row_index(worksheet)
+
+    for experiment in all_results:
+        experiment_number = _experiment_number(experiment.experiment_id)
+        for variant_name, variant_result in experiment.results.items():
+            variant_label = EXCEL_VARIANT_LABELS[variant_name].casefold()
+            row = row_index.get((experiment_number, variant_label))
+            if row is None:
+                raise KeyError(
+                    "Missing Excel row for "
+                    f"experiment {experiment_number} / {EXCEL_VARIANT_LABELS[variant_name]}"
+                )
+
+            for metric_name, column in EXCEL_METRIC_COLUMNS.items():
+                metric = variant_result.metrics[metric_name]
+                worksheet.cell(row=row, column=column, value=round(metric.score, 2))
+
+    out_path = RESULTS_DIR / f"results_{timestamp}.xlsx"
+    workbook.save(out_path)
+    return out_path
+
+
 def main() -> int:
     if not MANIFEST_PATH.exists():
         print(f"Missing manifest: {MANIFEST_PATH}", file=sys.stderr)
@@ -629,8 +705,10 @@ def main() -> int:
         "results": [asdict(r) for r in all_results],
     }
     out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    excel_out_path = _save_excel_results(all_results, ts)
 
     print(f"\nSaved detailed results to: {out_path}")
+    print(f"Saved Excel results to: {excel_out_path}")
     return 0
 
 

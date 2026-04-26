@@ -49,3 +49,4 @@ Ogni metrica produce un punteggio su 10.
 Output:
 - stampa un riepilogo su console
 - salva un JSON in `results/` con tutti i dettagli
+- crea anche un file Excel in `results/` a partire da `results/experiments-results-template.xlsx`, compilando le colonne F:O con i punteggi ottenuti
