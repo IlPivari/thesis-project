@@ -8,7 +8,8 @@ Obiettivo: per ogni esperimento generare **la stessa funzione** due volte (promp
 - test
 - lint
 - type checking
-- complessità
+- complessità ciclomatica
+- maintainability index
 - sicurezza di base
 - tempo di esecuzione (performance)
 
@@ -17,7 +18,9 @@ Obiettivo: per ogni esperimento generare **la stessa funzione** due volte (promp
 Ogni metrica produce un punteggio su 10.
 - **test**: $10 \cdot \frac{\#passed}{\#total}$
 - **performance**: confronto relativo tra basic/advanced (la più veloce ottiene 10/10, l’altra scala sul rapporto dei tempi)
-- altre metriche: 10 se OK, 0 se KO (eccetto **complessità**, che usa una scala basata sulla cyclomatic complexity massima)
+- **complessità ciclomatica**: scala basata sulla cyclomatic complexity massima del blocco peggiore
+- **maintainability index**: scala basata sul maintainability index restituito da Radon
+- altre metriche: 10 se OK, 0 se KO
 
 ## Struttura
 

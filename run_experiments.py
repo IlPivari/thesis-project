@@ -307,7 +307,7 @@ def _complexity_score_from_mi(mi_value: float | int | None) -> float | None:
     return max(0.0, min(10.0, float(mi_value) / 10.0))
 
 
-def _metric_radon(file_path: Path) -> MetricResult:
+def _metric_cyclomatic_complexity(file_path: Path) -> MetricResult:
     cmd_cc = [_python(), "-m", "radon", "cc", "-j", str(file_path)]
     res_cc = _run(cmd_cc, cwd=ROOT)
     cc_max = None
@@ -320,6 +320,24 @@ def _metric_radon(file_path: Path) -> MetricResult:
         except Exception:
             cc_max = None
 
+    cc_score = _complexity_score_from_cc(cc_max)
+    score = cc_score if cc_score is not None else (10.0 if res_cc.ok else 0.0)
+
+    return MetricResult(
+        ok=res_cc.ok,
+        score=score,
+        details={
+            "cmd": cmd_cc,
+            "seconds": res_cc.seconds,
+            "stdout": _short(res_cc.stdout),
+            "stderr": _short(res_cc.stderr),
+            "cc_max": cc_max,
+            "cc_score": cc_score,
+        },
+    )
+
+
+def _metric_maintainability_index(file_path: Path) -> MetricResult:
     cmd_mi = [_python(), "-m", "radon", "mi", "-j", str(file_path)]
     res_mi = _run(cmd_mi, cwd=ROOT)
     mi = None
@@ -330,33 +348,19 @@ def _metric_radon(file_path: Path) -> MetricResult:
         except Exception:
             mi = None
 
-    ok = res_cc.ok and res_mi.ok
-
-    # Complexity scoring (0..10): combine worst-block cyclomatic complexity
-    # with maintainability index, keeping CC slightly dominant for short files.
-    score: float
-    cc_score = _complexity_score_from_cc(cc_max)
     mi_score = _complexity_score_from_mi(mi)
-    if cc_score is not None and mi_score is not None:
-        score = round((0.6 * cc_score) + (0.4 * mi_score), 2)
-    elif cc_score is not None:
-        score = cc_score
-    elif mi_score is not None:
-        score = mi_score
-    else:
-        score = 10.0 if ok else 0.0
+    score = mi_score if mi_score is not None else (10.0 if res_mi.ok else 0.0)
 
     return MetricResult(
-        ok=ok,
+        ok=res_mi.ok,
         score=score,
         details={
-            "cc": {"cmd": cmd_cc, "seconds": res_cc.seconds, "stdout": _short(res_cc.stdout), "stderr": _short(res_cc.stderr)},
-            "mi": {"cmd": cmd_mi, "seconds": res_mi.seconds, "stdout": _short(res_mi.stdout), "stderr": _short(res_mi.stderr)},
-            "cc_max": cc_max,
-            "cc_score": cc_score,
+            "cmd": cmd_mi,
+            "seconds": res_mi.seconds,
+            "stdout": _short(res_mi.stdout),
+            "stderr": _short(res_mi.stderr),
             "mi_value": mi,
             "mi_score": mi_score,
-            "weights": {"cc": 0.6, "mi": 0.4},
         },
     )
 
@@ -492,7 +496,8 @@ def _evaluate_variant(
 
     metrics["lint"] = _metric_ruff(file_path)
     metrics["type_checking"] = _metric_mypy(file_path)
-    metrics["complexity"] = _metric_radon(file_path)
+    metrics["cyclomatic_complexity"] = _metric_cyclomatic_complexity(file_path)
+    metrics["maintainability_index"] = _metric_maintainability_index(file_path)
     metrics["basic_security"] = _metric_bandit(file_path)
     metrics["performance"] = _metric_performance(file_path, function_name, smoke_call)
 
@@ -509,7 +514,8 @@ def _print_summary(exp: ExperimentResult) -> None:
         "test",
         "lint",
         "type_checking",
-        "complexity",
+        "cyclomatic_complexity",
+        "maintainability_index",
         "basic_security",
         "performance",
     ]
@@ -519,18 +525,16 @@ def _print_summary(exp: ExperimentResult) -> None:
         a = exp.results["advanced"].metrics[metric]
 
         extra = ""
-        if metric == "complexity":
+        if metric == "cyclomatic_complexity":
             b_cc = b.details.get("cc_max")
             a_cc = a.details.get("cc_max")
+            if b_cc is not None or a_cc is not None:
+                extra = f"  (cc_max basic={b_cc}, advanced={a_cc})"
+        if metric == "maintainability_index":
             b_mi = b.details.get("mi_value")
             a_mi = a.details.get("mi_value")
-            if b_cc is not None or a_cc is not None or b_mi is not None or a_mi is not None:
-                extra = (
-                    "  ("
-                    f"cc_max basic={b_cc}, advanced={a_cc}; "
-                    f"mi basic={b_mi}, advanced={a_mi}"
-                    ")"
-                )
+            if b_mi is not None or a_mi is not None:
+                extra = f"  (mi basic={b_mi}, advanced={a_mi})"
         if metric == "basic_security":
             b_issues = b.details.get("issues")
             a_issues = a.details.get("issues")
